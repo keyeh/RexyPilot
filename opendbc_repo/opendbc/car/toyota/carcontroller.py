@@ -207,7 +207,7 @@ class CarController(CarControllerBase, GasInterceptorCarController):
         # Press distance button until we are at the correct bar length. Only change while enabled to avoid skipping startup popup
         if self.frame % 6 == 0 and self.CP.openpilotLongitudinalControl:
           desired_distance = 4 - hud_control.leadDistanceBars
-          if CS.out.cruiseState.enabled and CS.pcm_follow_distance != desired_distance:
+          if CS.out.cruiseState.available and CS.pcm_follow_distance != desired_distance:
             self.distance_button = not self.distance_button
           else:
             self.distance_button = 0
