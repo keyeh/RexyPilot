@@ -842,9 +842,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.NO_ENTRY: NoEntryAlert("Vehicle Sensors Calibrating"),
   },
 
-  EventName.personalityChanged: {
-    ET.WARNING: personality_changed_alert,
-  },
+  EventName.personalityChanged: {},
 
   EventName.userBookmark: {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", duration=1.5),
