@@ -143,7 +143,7 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: Alert(
       "Reverse\nGear",
       "",
-      AlertStatus.normal, AlertSize.full,
+      AlertStatus.normal, AlertSize.none,
       Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2, creation_delay=0.5),
     ET.NO_ENTRY: NoEntryAlert("Reverse Gear"),
   },
