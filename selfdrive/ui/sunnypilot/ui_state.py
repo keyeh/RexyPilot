@@ -14,6 +14,7 @@ from openpilot.system.ui.lib.application import gui_app
 
 OpenpilotState = log.SelfdriveState.OpenpilotState
 MADSState = custom.ModularAssistiveDrivingSystem.ModularAssistiveDrivingSystemState
+AlertStatus = log.SelfdriveState.AlertStatus
 
 ONROAD_BRIGHTNESS_TIMER_PAUSED = -1
 
@@ -68,7 +69,7 @@ class UIStateSP:
     if _ui_state.sm.recv_frame["carState"] < _ui_state.started_frame:
       return
 
-    has_alert = _ui_state.started and self.onroad_brightness != OnroadBrightness.AUTO and alert is not None
+    has_alert = _ui_state.started and self.onroad_brightness != OnroadBrightness.AUTO and alert is not None and alert.status != AlertStatus.normal
 
     self.update_onroad_brightness(has_alert)
     if has_alert:
