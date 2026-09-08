@@ -9,6 +9,7 @@ from enum import Enum
 from cereal import messaging, log, car, custom
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.display import OnroadBrightness
+from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import TRANS_COLD_TEMP_C, TRANS_WARN_TEMP_C
 from openpilot.sunnypilot.sunnylink.sunnylink_state import SunnylinkState
 from openpilot.system.ui.lib.application import gui_app
 
@@ -71,13 +72,16 @@ class UIStateSP:
       return
 
     has_alert = _ui_state.started and self.onroad_brightness != OnroadBrightness.AUTO and alert is not None and alert.status != AlertStatus.normal
+    trans_oil_temp = _ui_state.sm["carStateSP"].transOilTemp
+    is_abnormal_temp = _ui_state.started and (trans_oil_temp < TRANS_COLD_TEMP_C or trans_oil_temp >= TRANS_WARN_TEMP_C)
+    keep_awake = has_alert or is_abnormal_temp
 
-    self.update_onroad_brightness(has_alert)
-    if has_alert:
+    self.update_onroad_brightness(keep_awake)
+    if keep_awake:
       self.reset_onroad_sleep_timer()
 
-  def update_onroad_brightness(self, has_alert: bool) -> None:
-    if has_alert:
+  def update_onroad_brightness(self, keep_awake: bool) -> None:
+    if keep_awake:
       return
 
     if self.onroad_brightness_timer > 0:

@@ -12,6 +12,7 @@ from opendbc.car.carlog import carlog
 from opendbc.can.parser import CANParser
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.sunnypilot.car.toyota.values import ToyotaFlagsSP
+from opendbc.sunnypilot.car.toyota.lexus_is500_flags import is_lexus_is500
 
 TRAFFIC_SIGNAL_MAP = {
   1: "kph",
@@ -168,3 +169,5 @@ class CarStateExt:
     # Update traffic signals and speed limit
     self.update_traffic_signals(cp_cam)
     ret_sp.speedLimit = self.calculate_speed_limit()
+
+    ret_sp.transOilTemp = cp.vl["GEAR_PACKET"]["TRANS_OIL_TEMP"] if is_lexus_is500(self.CP_SP) else float('nan')

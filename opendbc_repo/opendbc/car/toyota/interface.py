@@ -8,6 +8,7 @@ from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerP
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.sunnypilot.car.toyota.values import ToyotaFlagsSP, ToyotaSafetyFlagsSP
+from opendbc.sunnypilot.car.toyota.lexus_is500_flags import LEXUS_IS500, LEXUS_IS500_VIN_RE
 
 SteerControlType = structs.CarParams.SteerControlType
 
@@ -197,6 +198,10 @@ class CarInterface(CarInterfaceBase):
       stock_cp.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.STOCK_LONGITUDINAL.value
     else:
       stock_cp.safetyConfigs[0].safetyParam &= ~ToyotaSafetyFlags.STOCK_LONGITUDINAL.value
+
+    # Identify Lexus IS500 by VIN (see lexus_is500_flags.py)
+    if candidate == CAR.LEXUS_IS_TSS2 and LEXUS_IS500_VIN_RE.match(stock_cp.carVin or ''):
+      ret.flags |= LEXUS_IS500
 
     return ret
 
