@@ -60,6 +60,7 @@ class UIStateSP:
     self.torque_override_enabled: bool = False
     self._sp_initialized: bool = False
     self._experimental_mode_prev: bool | None = None
+    self.performance_graph_active: bool = False
 
   def update(self) -> None:
     if self.sunnylink_enabled:
@@ -74,7 +75,7 @@ class UIStateSP:
     has_alert = _ui_state.started and self.onroad_brightness != OnroadBrightness.AUTO and alert is not None and alert.status != AlertStatus.normal
     trans_oil_temp = _ui_state.sm["carStateSP"].transOilTemp
     is_abnormal_temp = _ui_state.started and (trans_oil_temp < TRANS_COLD_TEMP_C or trans_oil_temp >= TRANS_WARN_TEMP_C)
-    keep_awake = has_alert or is_abnormal_temp
+    keep_awake = has_alert or is_abnormal_temp or self.performance_graph_active
 
     self.update_onroad_brightness(keep_awake)
     if keep_awake:

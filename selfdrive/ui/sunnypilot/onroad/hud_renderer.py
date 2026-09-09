@@ -64,6 +64,11 @@ class HudRendererSP(HudRenderer):
     self.speed_renderer.update()
     self.performance_renderer.update()
 
+  def user_interacting(self) -> bool:
+    # Also suppress AugmentedRoadView's tap-to-open-menu handler while the temp tile is pressed,
+    # otherwise it fires on press before the tile's own tap-to-open-graph fires on release.
+    return super().user_interacting() or self.performance_renderer.is_pressed
+
   def _get_icbm_status(self):
     if not self.pcm_cruise_speed and ui_state.sm['carControl'].enabled:
       if round(self.set_speed) != round(self.speed_cluster):
