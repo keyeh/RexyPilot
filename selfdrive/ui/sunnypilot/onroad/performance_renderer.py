@@ -11,6 +11,13 @@ from typing import NamedTuple
 import pyray as rl
 
 from openpilot.selfdrive.ui.onroad.hud_renderer import FONT_SIZES, COLORS
+from openpilot.selfdrive.ui.sunnypilot.onroad.performance_colors import (
+  REGION_COLORS,
+  REGION_ORDER,
+  TILE_BG_COLOR,
+  get_color_for_temp,
+  get_region_for_temp,
+)
 from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import (
   GRAPH_MARGIN_BOTTOM,
   GRAPH_MARGIN_TOP,
@@ -21,22 +28,17 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import (
   LABEL_FONT_SIZE,
   LEFT_MARGIN,
   LINE_THICKNESS,
-  REGION_COLORS,
-  REGION_ORDER,
   REGION_TILE_GAP,
   REGION_TILE_HEIGHT,
   REGION_TILE_LABEL_FONT_SIZE,
   REGION_TILE_VALUE_FONT_SIZE,
   THRESHOLDS,
-  TILE_BG_COLOR,
   TILE_PADDING,
   TILE_ROUNDNESS,
   TIME_TICK_INTERVAL_S,
   TRANS_COLD_TEMP_C,
   TRANS_CRIT_TEMP_C,
   VALUE_WIDTH_REFERENCES,
-  get_color_for_temp,
-  get_region_for_temp,
 )
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
