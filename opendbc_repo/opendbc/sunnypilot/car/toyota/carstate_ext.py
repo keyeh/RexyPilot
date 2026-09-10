@@ -170,4 +170,6 @@ class CarStateExt:
     self.update_traffic_signals(cp_cam)
     ret_sp.speedLimit = self.calculate_speed_limit()
 
-    ret_sp.transOilTemp = cp.vl["GEAR_PACKET"]["TRANS_OIL_TEMP"] if is_lexus_is500(self.CP_SP) else float('nan')
+    # Trans oil temp: Before GEAR_PACKET is first decoded, it defaults to a junk 0 value
+    gear_packet_seen = cp.message_states[cp.dbc.name_to_msg["GEAR_PACKET"].address].first_seen_nanos != 0
+    ret_sp.transOilTemp = cp.vl["GEAR_PACKET"]["TRANS_OIL_TEMP"] if is_lexus_is500(self.CP_SP) and gear_packet_seen else float('nan')
