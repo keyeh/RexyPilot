@@ -28,6 +28,7 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import (
   LABEL_FONT_SIZE,
   LEFT_MARGIN,
   LINE_THICKNESS,
+  MINMAX_LINE_COLOR,
   REGION_TILE_GAP,
   REGION_TILE_HEIGHT,
   REGION_TILE_LABEL_FONT_SIZE,
@@ -35,9 +36,12 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import (
   THRESHOLDS,
   TILE_PADDING,
   TILE_ROUNDNESS,
-  TIME_TICK_INTERVAL_S,
+  TIME_TICK_INTERVALS_S,
+  TIME_TICK_MAX_COUNT,
   TRANS_COLD_TEMP_C,
   TRANS_CRIT_TEMP_C,
+  TRANS_ROOM_TEMP_C,
+  TRANS_WARN_TEMP_C,
   VALUE_WIDTH_REFERENCES,
 )
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -94,6 +98,18 @@ def _format_duration(seconds: float) -> str:
   if minutes:
     return f"{minutes}m {secs}s"
   return f"{secs}s"
+
+
+def _format_tick_offset(offset_s: int) -> str:
+  """Format a "-<offset>" time-axis tick label. Unlike _format_duration, this must not floor a
+  non-round-minute offset (e.g. 75s) down to "-1m" - TIME_TICK_INTERVALS_S entries like 15/30
+  don't always divide evenly into minutes, so distinct ticks would otherwise collide on one label."""
+  if offset_s < 60:
+    return f"-{offset_s}s"
+  minutes, secs = divmod(offset_s, 60)
+  if secs:
+    return f"-{minutes}m{secs:02d}s"
+  return f"-{minutes}m"
 
 
 def _convert_temp(value_c: float, is_metric: bool) -> tuple[float, str]:
@@ -227,8 +243,8 @@ class PerformanceGraph(Widget):
       return
 
     values = [v for _, v in samples]
-    min_val = min(*values, TRANS_COLD_TEMP_C) - 5
-    max_val = max(*values, TRANS_CRIT_TEMP_C) + 5
+    min_val = min(*values, TRANS_ROOM_TEMP_C)
+    max_val = max(*values, TRANS_WARN_TEMP_C)
 
     def to_x(t: float) -> float:
       return graph_rect.x + (t - samples[0][0]) / max(samples[-1][0] - samples[0][0], 1.0) * graph_rect.width
@@ -238,16 +254,21 @@ class PerformanceGraph(Widget):
 
     # "CRITICAL" doesn't fit the margin here without overlapping the gridline, unlike the tile below.
     for temp, label in zip(THRESHOLDS, ("COLD", "WARN", "CRIT")):
-      self._draw_threshold_line(rect, graph_rect, to_y, temp, tr(label), is_metric)
+      if min_val <= temp <= max_val:
+        self._draw_threshold_line(rect, graph_rect, to_y, temp, tr(label), is_metric)
 
     durations = dict.fromkeys(REGION_ORDER, 0.0)
     prev_t, prev_v = samples[0]
     for t, v in samples[1:]:
       for (ta, va), (tb, vb) in _split_at_thresholds(prev_t, prev_v, t, v):
         mid_v = (va + vb) / 2
+        region = get_region_for_temp(mid_v)
         rl.draw_line_ex(rl.Vector2(to_x(ta), to_y(va)), rl.Vector2(to_x(tb), to_y(vb)), LINE_THICKNESS, get_color_for_temp(mid_v))
-        durations[get_region_for_temp(mid_v)] += tb - ta
+        durations[region] += tb - ta
       prev_t, prev_v = t, v
+
+    self._draw_axis_floor_label(graph_rect, min_val, is_metric)
+    self._draw_minmax_line(graph_rect, to_y, max(values), "MAX", is_metric)
 
     self._draw_time_labels(graph_rect, to_x, samples[0][0], samples[-1][0])
     self._draw_region_tiles(graph_rect, durations)
@@ -281,17 +302,45 @@ class PerformanceGraph(Widget):
     label_x = min(graph_rect.x + graph_rect.width + 10, rect.x + rect.width - label_width - 10)
     rl.draw_text_ex(self._font_label, label, rl.Vector2(label_x, y - LABEL_FONT_SIZE / 2), LABEL_FONT_SIZE, 0, GRID_COLOR)
 
+  def _draw_axis_floor_label(self, graph_rect: rl.Rectangle, min_val: float, is_metric: bool) -> None:
+    """Labels the y-axis floor at the x-axis baseline, in the same left column as the threshold
+    value labels - unlike those, there's no line to draw since the floor already is the bottom
+    edge of graph_rect."""
+    value, unit = _convert_temp(min_val, is_metric)
+    text = f"{value:.0f}{unit}"
+    text_width = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE).x
+    y = graph_rect.y + graph_rect.height
+    origin = rl.Vector2(graph_rect.x - text_width - 20, y - LABEL_FONT_SIZE / 2)
+    rl.draw_text_ex(self._font_label, text, origin, LABEL_FONT_SIZE, 0, COLORS.GREY)
+
+  def _draw_minmax_line(self, graph_rect: rl.Rectangle, to_y, value: float, tag: str, is_metric: bool) -> None:
+    y = to_y(value)
+    rl.draw_line_ex(rl.Vector2(graph_rect.x, y), rl.Vector2(graph_rect.x + graph_rect.width, y), 2, MINMAX_LINE_COLOR)
+
+    display_value, unit = _convert_temp(value, is_metric)
+    text = f"{tag} {display_value:.0f}°{unit}"
+    text_size = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE)
+    # Label sits just above the line, at the plot's left edge (a different column than the
+    # threshold labels, which sit outside the axis) - unless that would clip above the graph, in
+    # which case it drops below the line instead (e.g. MAX sitting near the very top).
+    label_y = y - text_size.y - 6
+    if label_y < graph_rect.y:
+      label_y = y + 6
+    rl.draw_text_ex(self._font_label, text, rl.Vector2(graph_rect.x, label_y), LABEL_FONT_SIZE, 0, MINMAX_LINE_COLOR)
+
   def _draw_time_labels(self, graph_rect: rl.Rectangle, to_x, t0: float, t1: float) -> None:
     tick_top = graph_rect.y + graph_rect.height
     label_y = tick_top + 16
 
-    num_ticks = int(max(t1 - t0, 1.0) // TIME_TICK_INTERVAL_S)
+    span = max(t1 - t0, 1.0)
+    interval = next((i for i in TIME_TICK_INTERVALS_S if span / i <= TIME_TICK_MAX_COUNT), TIME_TICK_INTERVALS_S[-1])
+    num_ticks = int(span // interval)
     for i in range(num_ticks + 1):
-      offset_s = i * TIME_TICK_INTERVAL_S
+      offset_s = i * interval
       x = to_x(t1 - offset_s)
       rl.draw_line_ex(rl.Vector2(x, tick_top), rl.Vector2(x, tick_top + 10), 2, GRID_COLOR)
 
-      text = tr("now") if offset_s == 0 else f"-{offset_s // 60:.0f}m"
+      text = tr("now") if offset_s == 0 else _format_tick_offset(offset_s)
       text_width = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE).x
       text_x = min(max(x - text_width / 2, graph_rect.x), graph_rect.x + graph_rect.width - text_width)
       rl.draw_text_ex(self._font_label, text, rl.Vector2(text_x, label_y), LABEL_FONT_SIZE, 0, COLORS.GREY)

@@ -6,6 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 import pyray as rl
 
+TRANS_ROOM_TEMP_C = 20.0
 TRANS_COLD_TEMP_C = 79.0
 TRANS_WARN_TEMP_C = 120.0
 TRANS_CRIT_TEMP_C = 135.0
@@ -32,9 +33,14 @@ GRAPH_MARGIN_BOTTOM = 220
 LINE_THICKNESS = 7
 GRID_COLOR = rl.Color(255, 255, 255, 60)
 LABEL_FONT_SIZE = 36
+MINMAX_LINE_COLOR = rl.Color(255, 255, 255, 130)
 
 REGION_TILE_GAP = 20
 REGION_TILE_HEIGHT = 130
 REGION_TILE_LABEL_FONT_SIZE = 28
 REGION_TILE_VALUE_FONT_SIZE = 44
-TIME_TICK_INTERVAL_S = 600  # 10 minutes
+# Candidate tick spacings; _pick_tick_interval() picks the smallest one that keeps the tick count
+# at or below TIME_TICK_MAX_COUNT for however much history is currently on screen, so a short
+# session (e.g. 90s in) still gets several labeled ticks instead of waiting for the first 10m one.
+TIME_TICK_INTERVALS_S = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800)
+TIME_TICK_MAX_COUNT = 6
