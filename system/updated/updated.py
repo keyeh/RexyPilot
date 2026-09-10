@@ -70,6 +70,13 @@ def write_time_to_param(params, param) -> None:
 def run(cmd: list[str], cwd: str | None = None) -> str:
   return subprocess.check_output(cmd, cwd=cwd, stderr=subprocess.STDOUT, encoding='utf8')
 
+def restart_time_sync() -> None:
+  cloudlog.info("system time invalid, restarting systemd-timesyncd to force NTP sync")
+  try:
+    subprocess.run(["sudo", "systemctl", "restart", "systemd-timesyncd"], check=False, timeout=10)
+  except Exception:
+    cloudlog.exception("failed to restart systemd-timesyncd")
+
 
 def set_consistent_flag(consistent: bool) -> None:
   os.sync()
@@ -449,7 +456,15 @@ def main() -> None:
         # ensure we have some params written soon after startup
         updater.set_params(False, update_failed_count, exception)
 
-        if not system_time_valid() or first_run:
+        if not system_time_valid():
+          params.put("UpdaterState", "syncing time...", block=True)
+          if AGNOS:
+            restart_time_sync()
+          first_run = False
+          wait_helper.sleep(60)
+          continue
+
+        if first_run:
           first_run = False
           wait_helper.sleep(60)
           continue
