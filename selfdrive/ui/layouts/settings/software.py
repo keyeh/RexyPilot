@@ -108,7 +108,13 @@ class SoftwareLayout(Widget):
     fetch_available = ui_state.params.get_bool("UpdaterFetchAvailable")
     update_available = ui_state.params.get_bool("UpdateAvailable")
 
-    if updater_state != "idle":
+    if updater_state == "syncing time...":
+      # Time isn't valid yet; keep CHECK clickable so the user can force a resync attempt
+      self._waiting_for_updater = False
+      self._download_btn.action_item.set_value(STATE_TO_DISPLAY_TEXT[updater_state])
+      self._download_btn.action_item.set_text(tr("CHECK"))
+      self._download_btn.action_item.set_enabled(True)
+    elif updater_state != "idle":
       # Updater responded
       self._waiting_for_updater = False
       self._download_btn.action_item.set_enabled(False)

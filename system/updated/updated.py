@@ -458,7 +458,7 @@ def main() -> None:
 
         if not system_time_valid():
           params.put("UpdaterState", "syncing time...", block=True)
-          if AGNOS:
+          if AGNOS and wait_helper.user_request == UserRequest.CHECK:
             restart_time_sync()
           first_run = False
           wait_helper.sleep(60)
