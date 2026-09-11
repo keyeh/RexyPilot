@@ -33,6 +33,8 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import (
   HISTORY_SAMPLE_INTERVAL_S,
   LABEL_FONT_SIZE,
   MINMAX_LINE_COLOR,
+  RATE_STEADY_THRESHOLD_C_S,
+  RATE_WINDOW_S,
   READOUT_UNIT_GAP,
   REGION_TILE_GAP,
   REGION_TILE_HEIGHT,
@@ -99,6 +101,19 @@ def _format_duration(seconds: float) -> str:
   return f"{secs}s"
 
 
+def _compute_rate(samples: list[tuple[float, float]]) -> float | None:
+  """°C/s over the last RATE_WINDOW_S of history, or the whole buffer if it's shorter than that."""
+  if len(samples) < 2:
+    return None
+  latest_t, latest_v = samples[-1]
+  window_start = latest_t - RATE_WINDOW_S
+  ref_t, ref_v = next(((t, v) for t, v in samples if t >= window_start), samples[0])
+  dt = latest_t - ref_t
+  if dt <= 0:
+    return None
+  return (latest_v - ref_v) / dt
+
+
 def _format_tick_offset(offset_s: int) -> str:
   """Unlike _format_duration, must not floor a non-round-minute offset (e.g. 75s) to "-1m", or distinct ticks would collide."""
   if offset_s < 60:
@@ -125,6 +140,13 @@ class _TextItem(NamedTuple):
 
 def _max_text_width(font: rl.Font, texts: Iterable[str], font_size: int) -> float:
   return max(measure_text_cached(font, text, font_size).x for text in texts)
+
+
+def _max_font_size_to_fit(font: rl.Font, text: str, max_width: float, max_height: float, reference_size: int = 100) -> int:
+  """Largest font size for `text` that still fits within max_width/max_height, since text size scales linearly with font size."""
+  reference = measure_text_cached(font, text, reference_size)
+  scale = min(max_width / reference.x, max_height / reference.y)
+  return int(reference_size * scale)
 
 
 def _ink_top_offset(font: rl.Font, text: str, font_size: int) -> float:
@@ -299,11 +321,11 @@ class PerformanceGraph(Widget):
     self._draw_minmax_line(graph_rect, to_y, max(v for _, v in samples), "MAX", is_metric)
 
     self._draw_time_labels(graph_rect, to_x, samples[0][0], samples[-1][0])
-    self._draw_region_tiles(rect, graph_rect, durations)
+    self._draw_region_tiles(rect, graph_rect, durations, _compute_rate(samples))
 
   def _draw_header(self, rect: rl.Rectangle, content_x: float) -> float:
     """Returns the y just below the title, so the plot can start a fixed gap below it regardless of font metrics."""
-    title = tr("TEMPERATURE")
+    title = tr("TRANS TEMP (PAN)")
     origin = rl.Vector2(content_x, rect.y + CONTENT_MARGIN_Y)
     size = measure_text_cached(self._font_title, title, FONT_SIZES.speed_unit)
     rl.draw_text_ex(self._font_title, title, origin, FONT_SIZES.speed_unit, 0, COLORS.WHITE)
@@ -395,27 +417,52 @@ class PerformanceGraph(Widget):
       text_x = min(max(x - text_width / 2, graph_rect.x), graph_rect.x + graph_rect.width - text_width)
       rl.draw_text_ex(self._font_label, text, rl.Vector2(text_x, label_y), LABEL_FONT_SIZE, 0, COLORS.GREY)
 
-  def _draw_region_tiles(self, rect: rl.Rectangle, graph_rect: rl.Rectangle, durations: dict[str, float]) -> None:
+  def _draw_region_tiles(self, rect: rl.Rectangle, graph_rect: rl.Rectangle, durations: dict[str, float], rate: float | None) -> None:
     """Bottom-anchored CONTENT_MARGIN_Y above rect's bottom edge to match the readout's margin."""
     tile_y = rect.y + rect.height - CONTENT_MARGIN_Y - REGION_TILE_HEIGHT
-    tile_width = (graph_rect.width - REGION_TILE_GAP * (len(REGION_ORDER) - 1)) / len(REGION_ORDER)
+    tile_count = len(REGION_ORDER) + 1  # +1 for the rate-of-change slot, leftmost in the row
+    tile_width = (graph_rect.width - REGION_TILE_GAP * (tile_count - 1)) / tile_count
+
+    def tile_rect_at(i: int) -> rl.Rectangle:
+      return rl.Rectangle(graph_rect.x + i * (tile_width + REGION_TILE_GAP), tile_y, tile_width, REGION_TILE_HEIGHT)
+
+    self._draw_rate_stat(tile_rect_at(0), rate)
 
     for i, region in enumerate(REGION_ORDER):
-      tile_rect = rl.Rectangle(graph_rect.x + i * (tile_width + REGION_TILE_GAP), tile_y, tile_width, REGION_TILE_HEIGHT)
+      tile_rect = tile_rect_at(i + 1)
       has_time = durations[region] > 0
       color = REGION_COLORS[region] if has_time else COLORS.GREY
       value_text = _format_duration(durations[region]) if has_time else "-"
+      self._draw_stat_tile(tile_rect, tr(region), value_text, color)
 
-      _draw_rounded_tile(tile_rect, rl.Color(255, 255, 255, 18), rl.Color(color.r, color.g, color.b, 130), border_thickness=2)
+  def _draw_rate_stat(self, tile_rect: rl.Rectangle, rate: float | None) -> None:
+    """Plain text, no tile background/label like its neighbors - a live instantaneous stat, not a session duration."""
+    if rate is None:
+      color, text = COLORS.GREY, "-"
+    elif rate > RATE_STEADY_THRESHOLD_C_S:
+      color, text = REGION_COLORS["WARN"], f"+{rate:.1f}°/s"
+    elif rate < -RATE_STEADY_THRESHOLD_C_S:
+      color, text = REGION_COLORS["COLD"], f"{rate:.1f}°/s"
+    else:
+      color, text = COLORS.WHITE_TRANSLUCENT, "steady"
 
-      items = [
-        _text_item(self._font_label, tr(region), REGION_TILE_LABEL_FONT_SIZE, COLORS.GREY),
-        _text_item(self._font_title, value_text, REGION_TILE_VALUE_FONT_SIZE, color),
-      ]
-      block_height = sum(item.size.y for item in items) + 8
-      block_y = tile_rect.y + tile_rect.height / 2 - block_height / 2
+    padding = 8  # small breathing room so the text doesn't touch the neighboring tile or the row's edges
+    font_size = _max_font_size_to_fit(self._font_title, text, tile_rect.width - padding * 2, tile_rect.height - padding * 2)
+    text_size = measure_text_cached(self._font_title, text, font_size)
+    origin = rl.Vector2(tile_rect.x + tile_rect.width / 2 - text_size.x / 2, tile_rect.y + tile_rect.height / 2 - text_size.y / 2)
+    rl.draw_text_ex(self._font_title, text, origin, font_size, 0, color)
 
-      _draw_centered_stack(items, tile_rect.x + tile_rect.width / 2, block_y, gap=8)
+  def _draw_stat_tile(self, tile_rect: rl.Rectangle, label: str, value_text: str, color: rl.Color) -> None:
+    _draw_rounded_tile(tile_rect, rl.Color(255, 255, 255, 18), rl.Color(color.r, color.g, color.b, 130), border_thickness=2)
+
+    items = [
+      _text_item(self._font_label, label, REGION_TILE_LABEL_FONT_SIZE, COLORS.GREY),
+      _text_item(self._font_title, value_text, REGION_TILE_VALUE_FONT_SIZE, color),
+    ]
+    block_height = sum(item.size.y for item in items) + 8
+    block_y = tile_rect.y + tile_rect.height / 2 - block_height / 2
+
+    _draw_centered_stack(items, tile_rect.x + tile_rect.width / 2, block_y, gap=8)
 
   def _draw_centered_text(self, rect: rl.Rectangle, text: str) -> None:
     size = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE)

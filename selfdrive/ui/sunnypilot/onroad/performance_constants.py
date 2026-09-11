@@ -7,7 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 import pyray as rl
 
 # Temperature thresholds (transmission oil temp, Celsius)
-TRANS_ROOM_TEMP_C = 20.0  # gauge/chart domain floor, not a region boundary
+TRANS_ROOM_TEMP_C = 25.0  # gauge/chart domain floor, not a region boundary
 TRANS_COLD_TEMP_C = 79.0
 TRANS_WARN_TEMP_C = 120.0
 TRANS_CRIT_TEMP_C = 135.0
@@ -52,6 +52,10 @@ REGION_TILE_HEIGHT = 130
 REGION_TILE_LABEL_FONT_SIZE = 28
 REGION_TILE_VALUE_FONT_SIZE = 44
 REGION_TILES_MARGIN_TOP = 80  # minimum gap above the tiles; they're bottom-anchored, so the actual gap grows if the readout needs more room (see _render)
+
+# Rate-of-change stat, leftmost in the region-tile row (see _draw_rate_stat)
+RATE_WINDOW_S = 5.0  # smooths over the last few seconds so one noisy sample doesn't swing the reading
+RATE_STEADY_THRESHOLD_C_S = 0.1  # magnitude below this reads as "steady" rather than rising/falling
 
 # Chart time axis
 TIME_TICK_INTERVALS_S = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800)  # candidates; _draw_time_labels() picks the smallest keeping tick count <= TIME_TICK_MAX_COUNT
