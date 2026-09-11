@@ -6,6 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 import math
 from collections import deque
+from collections.abc import Iterable
 from typing import NamedTuple
 
 import pyray as rl
@@ -19,33 +20,38 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.performance_colors import (
   get_region_for_temp,
 )
 from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import (
-  GRAPH_MARGIN_BOTTOM,
-  GRAPH_MARGIN_TOP,
-  GRAPH_MARGIN_X,
+  BORDER_THICKNESS,
+  CHART_LINE_THICKNESS,
+  CONTENT_MARGIN_X,
+  CONTENT_MARGIN_Y,
+  GAUGE_COLUMN_GAP,
+  GAUGE_READOUT_GAP,
+  GAUGE_TICK_VALUES,
   GRID_COLOR,
+  HEADER_GAP,
   HISTORY_MAXLEN,
   HISTORY_SAMPLE_INTERVAL_S,
   LABEL_FONT_SIZE,
-  LEFT_MARGIN,
-  LINE_THICKNESS,
   MINMAX_LINE_COLOR,
+  READOUT_UNIT_GAP,
   REGION_TILE_GAP,
   REGION_TILE_HEIGHT,
   REGION_TILE_LABEL_FONT_SIZE,
   REGION_TILE_VALUE_FONT_SIZE,
+  REGION_TILES_MARGIN_TOP,
+  ROUNDNESS,
   THRESHOLDS,
+  THRESHOLD_LABEL_GAP,
+  TILE_LEFT_MARGIN,
   TILE_PADDING,
-  TILE_ROUNDNESS,
   TIME_TICK_INTERVALS_S,
   TIME_TICK_MAX_COUNT,
-  TRANS_COLD_TEMP_C,
   TRANS_CRIT_TEMP_C,
   TRANS_ROOM_TEMP_C,
-  TRANS_WARN_TEMP_C,
   VALUE_WIDTH_REFERENCES,
 )
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
@@ -59,13 +65,7 @@ def read_trans_oil_temp() -> float:
 
 
 def sample_if_due(history: deque[tuple[float, float]], trans_oil_temp: float) -> None:
-  """Append a (time, value) sample at most once per HISTORY_SAMPLE_INTERVAL_S.
-
-  Must be called from whichever of PerformanceRenderer/PerformanceGraph is actually being
-  rendered this frame: only the top-of-nav-stack widget renders, so when the graph overlay is
-  open, PerformanceRenderer stops rendering (and thus stops updating) entirely - sampling can't
-  live in just one of them or history freezes whenever the other one is on screen.
-  """
+  """Must be called every frame by whichever widget is actually rendering, since only the top-of-nav-stack widget renders."""
   if math.isnan(trans_oil_temp):
     return
   now = rl.get_time()
@@ -75,8 +75,7 @@ def sample_if_due(history: deque[tuple[float, float]], trans_oil_temp: float) ->
 
 
 def _split_at_thresholds(t0: float, v0: float, t1: float, v1: float) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-  """Split a (t0,v0)->(t1,v1) segment at every threshold it crosses, so callers can attribute an
-  exact sub-range of time/pixels to the region on each side, instead of the whole segment."""
+  """Split a (t0,v0)->(t1,v1) segment at every threshold it crosses, so each sub-segment maps to one region."""
   crossings = []
   for threshold in THRESHOLDS:
     lo, hi = min(v0, v1), max(v0, v1)
@@ -101,9 +100,7 @@ def _format_duration(seconds: float) -> str:
 
 
 def _format_tick_offset(offset_s: int) -> str:
-  """Format a "-<offset>" time-axis tick label. Unlike _format_duration, this must not floor a
-  non-round-minute offset (e.g. 75s) down to "-1m" - TIME_TICK_INTERVALS_S entries like 15/30
-  don't always divide evenly into minutes, so distinct ticks would otherwise collide on one label."""
+  """Unlike _format_duration, must not floor a non-round-minute offset (e.g. 75s) to "-1m", or distinct ticks would collide."""
   if offset_s < 60:
     return f"-{offset_s}s"
   minutes, secs = divmod(offset_s, 60)
@@ -126,6 +123,23 @@ class _TextItem(NamedTuple):
   color: rl.Color
 
 
+def _max_text_width(font: rl.Font, texts: Iterable[str], font_size: int) -> float:
+  return max(measure_text_cached(font, text, font_size).x for text in texts)
+
+
+def _ink_top_offset(font: rl.Font, text: str, font_size: int) -> float:
+  """Vertical distance from a draw_text_ex origin down to the text's topmost ink pixel.
+
+  measure_text_cached/draw_text_ex size text boxes to font_size (line-height), not glyph ink extent,
+  so two differently-sized strings drawn at the same origin.y do NOT have their ink tops line up.
+  Glyphs are authored at font.baseSize and scaled to the requested size when drawn, so we replicate
+  that scaling here using the font's real per-glyph offsetY to find the true ink top.
+  """
+  scale = font_size * FONT_SCALE / font.baseSize
+  offsets = [font.glyphs[rl.get_glyph_index(font, ord(ch))].offsetY for ch in text if not ch.isspace()]
+  return min(offsets, default=0) * scale
+
+
 def _text_item(font: rl.Font, text: str, font_size: int, color: rl.Color) -> _TextItem:
   return _TextItem(font, text, measure_text_cached(font, text, font_size), font_size, color)
 
@@ -138,9 +152,9 @@ def _draw_centered_stack(items: list[_TextItem], center_x: float, top_y: float, 
     y += item.size.y + gap
 
 
-def _draw_rounded_tile(rect: rl.Rectangle, bg_color: rl.Color, border_color: rl.Color, border_thickness: float = 10) -> None:
-  rl.draw_rectangle_rounded(rect, TILE_ROUNDNESS, 10, bg_color)
-  rl.draw_rectangle_rounded_lines_ex(rect, TILE_ROUNDNESS, 10, border_thickness, border_color)
+def _draw_rounded_tile(rect: rl.Rectangle, bg_color: rl.Color, border_color: rl.Color, border_thickness: float = BORDER_THICKNESS) -> None:
+  rl.draw_rectangle_rounded(rect, ROUNDNESS, 10, bg_color)
+  rl.draw_rectangle_rounded_lines_ex(rect, ROUNDNESS, 10, border_thickness, border_color)
 
 
 class PerformanceRenderer(Widget):
@@ -156,8 +170,7 @@ class PerformanceRenderer(Widget):
 
   @property
   def _hit_rect(self) -> rl.Rectangle:
-    # Restrict taps to the visible tile, not the full HUD rect this widget is rendered into.
-    return self._tile_rect
+    return self._tile_rect  # restrict taps to the visible tile, not the full HUD rect
 
   def update(self):
     self.trans_oil_temp = read_trans_oil_temp()
@@ -178,14 +191,14 @@ class PerformanceRenderer(Widget):
       _text_item(self.font, f"{value:.0f}", FONT_SIZES.current_speed, color),
       _text_item(self.font_label, f"°{unit}", FONT_SIZES.speed_unit, COLORS.GREY),
     ]
-    value_width = max(measure_text_cached(self.font, ref, FONT_SIZES.current_speed).x for ref in VALUE_WIDTH_REFERENCES)
+    value_width = _max_text_width(self.font, VALUE_WIDTH_REFERENCES, FONT_SIZES.current_speed)
 
     block_width = max(value_width, *(item.size.x for item in items))
     block_height = sum(item.size.y for item in items)
     block_y = rect.y + rect.height / 2 - block_height / 2
 
     tile_rect = rl.Rectangle(
-      rect.x + LEFT_MARGIN - TILE_PADDING,
+      rect.x + TILE_LEFT_MARGIN - TILE_PADDING,
       block_y - TILE_PADDING,
       block_width + TILE_PADDING * 2,
       block_height + TILE_PADDING * 2,
@@ -193,7 +206,7 @@ class PerformanceRenderer(Widget):
     _draw_rounded_tile(tile_rect, TILE_BG_COLOR, color)
     self._tile_rect = tile_rect
 
-    _draw_centered_stack(items, rect.x + LEFT_MARGIN + block_width / 2, block_y)
+    _draw_centered_stack(items, rect.x + TILE_LEFT_MARGIN + block_width / 2, block_y)
 
 
 class PerformanceGraph(Widget):
@@ -223,39 +236,55 @@ class PerformanceGraph(Widget):
     is_metric = True  # TODO: temporarily hardcoded to Celsius for testing
     # is_metric = ui_state.is_metric
 
-    # Keep sampling while this overlay is the one actually rendering - PerformanceRenderer stops
-    # rendering (and thus stops sampling) whenever this graph is on top of the nav stack.
     live_temp = read_trans_oil_temp()
     sample_if_due(self._history, live_temp)
 
     samples = list(self._history)
-    self._draw_header(rect, None if math.isnan(live_temp) else live_temp, is_metric)
 
-    graph_rect = rl.Rectangle(
-      rect.x + GRAPH_MARGIN_X,
-      rect.y + GRAPH_MARGIN_TOP,
-      rect.width - GRAPH_MARGIN_X * 2,
-      rect.height - GRAPH_MARGIN_TOP - GRAPH_MARGIN_BOTTOM,
-    )
+    content_x = rect.x + CONTENT_MARGIN_X
+    header_bottom = self._draw_header(rect, content_x)
+
+    # Bottom-anchored elements (see _draw_readout/_draw_region_tiles): whichever is taller sets the plot's bottom edge; the other just gets extra room above it.
+    plot_y = header_bottom + HEADER_GAP
+    value_text_height = measure_text_cached(self._font_title, "0", FONT_SIZES.current_speed).y
+    readout_content_height = GAUGE_READOUT_GAP + value_text_height
+    chart_content_height = REGION_TILES_MARGIN_TOP + REGION_TILE_HEIGHT
+    bottom_content_height = max(readout_content_height, chart_content_height)
+    plot_h = rect.y + rect.height - CONTENT_MARGIN_Y - bottom_content_height - plot_y
+
+    def to_y(v: float) -> float:
+      return plot_y + plot_h - (v - TRANS_ROOM_TEMP_C) / (TRANS_CRIT_TEMP_C - TRANS_ROOM_TEMP_C) * plot_h
+
+    # Widths use fixed reference strings, not live text, so nothing shifts as digit counts change.
+    value_width = _max_text_width(self._font_title, VALUE_WIDTH_REFERENCES, FONT_SIZES.current_speed)
+    unit_width = _max_text_width(self._font_label, ("°C", "°F"), FONT_SIZES.current_speed // 2)
+    readout_width = value_width + READOUT_UNIT_GAP + unit_width
+
+    tick_label_width = _max_text_width(self._font_label, (f"{t:.0f}°" for t in GAUGE_TICK_VALUES), LABEL_FONT_SIZE)
+    gauge_width = readout_width - GAUGE_COLUMN_GAP - tick_label_width
+
+    # Chart is narrowed to reserve a column for the threshold labels, so they can't overlap the gridlines.
+    region_label_width = _max_text_width(self._font_label, (tr(name) for name in ("COLD", "WARN", "CRIT")), LABEL_FONT_SIZE)
+
+    gauge_rect = rl.Rectangle(content_x, plot_y, gauge_width, plot_h)
+    graph_x = gauge_rect.x + gauge_rect.width + GAUGE_COLUMN_GAP + tick_label_width + GAUGE_COLUMN_GAP
+    graph_width = rect.x + rect.width - CONTENT_MARGIN_X - THRESHOLD_LABEL_GAP - region_label_width - graph_x
+    graph_rect = rl.Rectangle(graph_x, plot_y, graph_width, plot_h)
+
+    self._draw_gauge(gauge_rect, to_y, live_temp, tick_label_width)
+
+    readout_rect = rl.Rectangle(content_x, gauge_rect.y + gauge_rect.height, readout_width, rect.y + rect.height - (gauge_rect.y + gauge_rect.height))
+    self._draw_readout(readout_rect, live_temp, is_metric)
 
     if len(samples) < 2:
       self._draw_centered_text(graph_rect, tr("Gathering data..."))
       return
 
-    values = [v for _, v in samples]
-    min_val = min(*values, TRANS_ROOM_TEMP_C)
-    max_val = max(*values, TRANS_WARN_TEMP_C)
-
     def to_x(t: float) -> float:
       return graph_rect.x + (t - samples[0][0]) / max(samples[-1][0] - samples[0][0], 1.0) * graph_rect.width
 
-    def to_y(v: float) -> float:
-      return graph_rect.y + graph_rect.height - (v - min_val) / (max_val - min_val) * graph_rect.height
-
-    # "CRITICAL" doesn't fit the margin here without overlapping the gridline, unlike the tile below.
     for temp, label in zip(THRESHOLDS, ("COLD", "WARN", "CRIT")):
-      if min_val <= temp <= max_val:
-        self._draw_threshold_line(rect, graph_rect, to_y, temp, tr(label), is_metric)
+      self._draw_threshold_line(graph_rect, to_y, temp, tr(label))
 
     durations = dict.fromkeys(REGION_ORDER, 0.0)
     prev_t, prev_v = samples[0]
@@ -263,55 +292,77 @@ class PerformanceGraph(Widget):
       for (ta, va), (tb, vb) in _split_at_thresholds(prev_t, prev_v, t, v):
         mid_v = (va + vb) / 2
         region = get_region_for_temp(mid_v)
-        rl.draw_line_ex(rl.Vector2(to_x(ta), to_y(va)), rl.Vector2(to_x(tb), to_y(vb)), LINE_THICKNESS, get_color_for_temp(mid_v))
+        rl.draw_line_ex(rl.Vector2(to_x(ta), to_y(va)), rl.Vector2(to_x(tb), to_y(vb)), CHART_LINE_THICKNESS, get_color_for_temp(mid_v))
         durations[region] += tb - ta
       prev_t, prev_v = t, v
 
-    self._draw_axis_floor_label(graph_rect, min_val, is_metric)
-    self._draw_minmax_line(graph_rect, to_y, max(values), "MAX", is_metric)
+    self._draw_minmax_line(graph_rect, to_y, max(v for _, v in samples), "MAX", is_metric)
 
     self._draw_time_labels(graph_rect, to_x, samples[0][0], samples[-1][0])
-    self._draw_region_tiles(graph_rect, durations)
+    self._draw_region_tiles(rect, graph_rect, durations)
 
-  def _draw_header(self, rect: rl.Rectangle, current_temp: float | None, is_metric: bool) -> None:
-    # Both pinned to the left, closest to the driver's eyeline, with the title and value close
-    # together as one unit rather than split to opposite corners.
-    title = tr("TRANS TEMP")
-    title_size = measure_text_cached(self._font_title, title, FONT_SIZES.speed_unit)
-    title_origin = rl.Vector2(rect.x + GRAPH_MARGIN_X, rect.y + 60)
-    rl.draw_text_ex(self._font_title, title, title_origin, FONT_SIZES.speed_unit, 0, COLORS.WHITE)
+  def _draw_header(self, rect: rl.Rectangle, content_x: float) -> float:
+    """Returns the y just below the title, so the plot can start a fixed gap below it regardless of font metrics."""
+    title = tr("TEMPERATURE")
+    origin = rl.Vector2(content_x, rect.y + CONTENT_MARGIN_Y)
+    size = measure_text_cached(self._font_title, title, FONT_SIZES.speed_unit)
+    rl.draw_text_ex(self._font_title, title, origin, FONT_SIZES.speed_unit, 0, COLORS.WHITE)
+    return origin.y + size.y
 
-    if current_temp is None:
-      return
-    value, unit = _convert_temp(current_temp, is_metric)
-    value_text = f"{value:.0f}{unit}"
-    value_origin = rl.Vector2(title_origin.x + title_size.x + 30, rect.y + 60)
-    rl.draw_text_ex(self._font_title, value_text, value_origin, FONT_SIZES.speed_unit, 0, get_color_for_temp(current_temp))
+  def _draw_gauge(self, rect: rl.Rectangle, to_y, live_temp: float, tick_label_width: float) -> None:
+    """`rect` shares plot_y/plot_h with the chart's graph_rect, so to_y(temp) lands on the same pixel row in both.
 
-  def _draw_threshold_line(self, rect: rl.Rectangle, graph_rect: rl.Rectangle, to_y, temp: float, label: str, is_metric: bool) -> None:
+    The bar is drawn BORDER_THICKNESS narrower than `rect`: draw_rectangle_rounded_lines_ex's stroke bleeds
+    outward past its own rect on straight edges, so shrinking the bar keeps that outward bleed - and thus the
+    gauge's true visual edge - right at `rect`'s edge instead of past it.
+    """
+    bar_rect = rl.Rectangle(rect.x, rect.y, rect.width - BORDER_THICKNESS, rect.height)
+    rl.draw_rectangle_rounded(bar_rect, ROUNDNESS, 10, rl.Color(255, 255, 255, 18))
+
+    if not math.isnan(live_temp):
+      fill_top = to_y(min(max(live_temp, TRANS_ROOM_TEMP_C), TRANS_CRIT_TEMP_C))
+      fill_height = bar_rect.y + bar_rect.height - fill_top
+      rl.begin_scissor_mode(int(bar_rect.x), int(fill_top), int(bar_rect.width), int(fill_height) + 1)
+      rl.draw_rectangle_rounded(bar_rect, ROUNDNESS, 10, get_color_for_temp(live_temp))
+      rl.end_scissor_mode()
+
+    rl.draw_rectangle_rounded_lines_ex(bar_rect, ROUNDNESS, 10, BORDER_THICKNESS, COLORS.WHITE_TRANSLUCENT)
+
+    tick_label_right = rect.x + rect.width + GAUGE_COLUMN_GAP + tick_label_width
+    for temp in GAUGE_TICK_VALUES:
+      y = to_y(temp)
+      text = f"{temp:.0f}°"
+      text_size = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE)
+      origin = rl.Vector2(tick_label_right - text_size.x, y - text_size.y / 2)
+      rl.draw_text_ex(self._font_label, text, origin, LABEL_FONT_SIZE, 0, COLORS.GREY)
+
+  def _draw_readout(self, rect: rl.Rectangle, live_temp: float, is_metric: bool) -> None:
+    """`rect` spans gauge-bottom to screen-bottom; the value is bottom-anchored CONTENT_MARGIN_Y above rect's bottom to match the region tiles' margin."""
+    if math.isnan(live_temp):
+      value_text, unit_text, color = "--", "", COLORS.GREY
+    else:
+      value, unit = _convert_temp(live_temp, is_metric)
+      value_text, unit_text, color = f"{value:.0f}", f"°{unit}", get_color_for_temp(live_temp)
+
+    value_size = measure_text_cached(self._font_title, value_text, FONT_SIZES.current_speed)
+    origin_y = rect.y + rect.height - CONTENT_MARGIN_Y - value_size.y
+    rl.draw_text_ex(self._font_title, value_text, rl.Vector2(rect.x, origin_y), FONT_SIZES.current_speed, 0, color)
+
+    if unit_text:
+      unit_font_size = FONT_SIZES.current_speed // 2
+      value_ink_top = _ink_top_offset(self._font_title, value_text, FONT_SIZES.current_speed)
+      unit_ink_top = _ink_top_offset(self._font_label, unit_text, unit_font_size)
+      unit_origin = rl.Vector2(rect.x + value_size.x + READOUT_UNIT_GAP, origin_y + value_ink_top - unit_ink_top)
+      rl.draw_text_ex(self._font_label, unit_text, unit_origin, unit_font_size, 0, color)
+
+  def _draw_threshold_line(self, graph_rect: rl.Rectangle, to_y, temp: float, label: str) -> None:
+    """The label sits in the fixed-width column reserved to the right of graph_rect (see _render)."""
     y = to_y(temp)
     rl.draw_line_ex(rl.Vector2(graph_rect.x, y), rl.Vector2(graph_rect.x + graph_rect.width, y), 2, GRID_COLOR)
 
-    value, unit = _convert_temp(temp, is_metric)
-    value_text = f"{value:.0f}{unit}"
-    value_width = measure_text_cached(self._font_label, value_text, LABEL_FONT_SIZE).x
-    value_origin = rl.Vector2(graph_rect.x - value_width - 20, y - LABEL_FONT_SIZE / 2)
-    rl.draw_text_ex(self._font_label, value_text, value_origin, LABEL_FONT_SIZE, 0, COLORS.GREY)
-
-    label_width = measure_text_cached(self._font_label, label, LABEL_FONT_SIZE).x
-    label_x = min(graph_rect.x + graph_rect.width + 10, rect.x + rect.width - label_width - 10)
-    rl.draw_text_ex(self._font_label, label, rl.Vector2(label_x, y - LABEL_FONT_SIZE / 2), LABEL_FONT_SIZE, 0, GRID_COLOR)
-
-  def _draw_axis_floor_label(self, graph_rect: rl.Rectangle, min_val: float, is_metric: bool) -> None:
-    """Labels the y-axis floor at the x-axis baseline, in the same left column as the threshold
-    value labels - unlike those, there's no line to draw since the floor already is the bottom
-    edge of graph_rect."""
-    value, unit = _convert_temp(min_val, is_metric)
-    text = f"{value:.0f}{unit}"
-    text_width = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE).x
-    y = graph_rect.y + graph_rect.height
-    origin = rl.Vector2(graph_rect.x - text_width - 20, y - LABEL_FONT_SIZE / 2)
-    rl.draw_text_ex(self._font_label, text, origin, LABEL_FONT_SIZE, 0, COLORS.GREY)
+    label_x = graph_rect.x + graph_rect.width + THRESHOLD_LABEL_GAP
+    label_size = measure_text_cached(self._font_label, label, LABEL_FONT_SIZE)
+    rl.draw_text_ex(self._font_label, label, rl.Vector2(label_x, y - label_size.y / 2), LABEL_FONT_SIZE, 0, GRID_COLOR)
 
   def _draw_minmax_line(self, graph_rect: rl.Rectangle, to_y, value: float, tag: str, is_metric: bool) -> None:
     y = to_y(value)
@@ -320,17 +371,16 @@ class PerformanceGraph(Widget):
     display_value, unit = _convert_temp(value, is_metric)
     text = f"{tag} {display_value:.0f}°{unit}"
     text_size = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE)
-    # Label sits just above the line, at the plot's left edge (a different column than the
-    # threshold labels, which sit outside the axis) - unless that would clip above the graph, in
-    # which case it drops below the line instead (e.g. MAX sitting near the very top).
     label_y = y - text_size.y - 6
-    if label_y < graph_rect.y:
+    if label_y < graph_rect.y:  # drop below the line instead of clipping above the graph
       label_y = y + 6
     rl.draw_text_ex(self._font_label, text, rl.Vector2(graph_rect.x, label_y), LABEL_FONT_SIZE, 0, MINMAX_LINE_COLOR)
 
   def _draw_time_labels(self, graph_rect: rl.Rectangle, to_x, t0: float, t1: float) -> None:
     tick_top = graph_rect.y + graph_rect.height
     label_y = tick_top + 16
+
+    rl.draw_line_ex(rl.Vector2(graph_rect.x, tick_top), rl.Vector2(graph_rect.x + graph_rect.width, tick_top), 2, GRID_COLOR)
 
     span = max(t1 - t0, 1.0)
     interval = next((i for i in TIME_TICK_INTERVALS_S if span / i <= TIME_TICK_MAX_COUNT), TIME_TICK_INTERVALS_S[-1])
@@ -345,8 +395,9 @@ class PerformanceGraph(Widget):
       text_x = min(max(x - text_width / 2, graph_rect.x), graph_rect.x + graph_rect.width - text_width)
       rl.draw_text_ex(self._font_label, text, rl.Vector2(text_x, label_y), LABEL_FONT_SIZE, 0, COLORS.GREY)
 
-  def _draw_region_tiles(self, graph_rect: rl.Rectangle, durations: dict[str, float]) -> None:
-    tile_y = graph_rect.y + graph_rect.height + 80
+  def _draw_region_tiles(self, rect: rl.Rectangle, graph_rect: rl.Rectangle, durations: dict[str, float]) -> None:
+    """Bottom-anchored CONTENT_MARGIN_Y above rect's bottom edge to match the readout's margin."""
+    tile_y = rect.y + rect.height - CONTENT_MARGIN_Y - REGION_TILE_HEIGHT
     tile_width = (graph_rect.width - REGION_TILE_GAP * (len(REGION_ORDER) - 1)) / len(REGION_ORDER)
 
     for i, region in enumerate(REGION_ORDER):
@@ -357,7 +408,6 @@ class PerformanceGraph(Widget):
 
       _draw_rounded_tile(tile_rect, rl.Color(255, 255, 255, 18), rl.Color(color.r, color.g, color.b, 130), border_thickness=2)
 
-      # Region keys are already their own display text ("COLD", "NORMAL", "WARN", "CRITICAL").
       items = [
         _text_item(self._font_label, tr(region), REGION_TILE_LABEL_FONT_SIZE, COLORS.GREY),
         _text_item(self._font_title, value_text, REGION_TILE_VALUE_FONT_SIZE, color),

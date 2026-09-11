@@ -6,41 +6,53 @@ See the LICENSE.md file in the root directory for more details.
 """
 import pyray as rl
 
-TRANS_ROOM_TEMP_C = 20.0
+# Temperature thresholds (transmission oil temp, Celsius)
+TRANS_ROOM_TEMP_C = 20.0  # gauge/chart domain floor, not a region boundary
 TRANS_COLD_TEMP_C = 79.0
 TRANS_WARN_TEMP_C = 120.0
 TRANS_CRIT_TEMP_C = 135.0
-THRESHOLDS = (TRANS_COLD_TEMP_C, TRANS_WARN_TEMP_C, TRANS_CRIT_TEMP_C)
+THRESHOLDS = (TRANS_COLD_TEMP_C, TRANS_WARN_TEMP_C, TRANS_CRIT_TEMP_C)  # ascending order - zipped with region labels elsewhere
 
+GAUGE_TICK_VALUES = (TRANS_ROOM_TEMP_C, *THRESHOLDS)  # temps shown as ticks on the gauge
+
+# History buffer
 HISTORY_WINDOW_S = 1800  # 30 minutes, in-memory only (resets on restart)
 HISTORY_SAMPLE_INTERVAL_S = 1.0
 HISTORY_MAXLEN = int(HISTORY_WINDOW_S / HISTORY_SAMPLE_INTERVAL_S)
 
-# PerformanceRenderer: the small always-on onroad tile.
-LEFT_MARGIN = 60
+# PerformanceRenderer: the small always-on onroad tile
+TILE_LEFT_MARGIN = 60
 TILE_PADDING = 16
-TILE_ROUNDNESS = 0.2
+ROUNDNESS = 0.2  # shared by the onroad tile, the gauge bar, and the region tiles
+BORDER_THICKNESS = 8  # shared by the onroad tile and the gauge bar, so their outlines match
 
-# Widest realistic digit strings, so the tile's width is reserved up front and never shifts as the
-# live value's digit count changes (e.g. "50" vs "122" vs "-5"). "0" measures wider than every
-# other digit in this font, so it - not "9" - is the correct worst-case filler digit.
-VALUE_WIDTH_REFERENCES = ("-00", "000")
-
-# PerformanceGraph: the tap-to-view full-screen history overlay.
-GRAPH_MARGIN_X = 160
-GRAPH_MARGIN_TOP = 160
-GRAPH_MARGIN_BOTTOM = 220
-LINE_THICKNESS = 7
+# PerformanceGraph: the tap-to-view full-screen history overlay
+CONTENT_MARGIN_X = 40  # left/right margin of the whole content column
+CONTENT_MARGIN_Y = 40  # top/bottom margin of the whole content column; the plot between them sizes dynamically to fill what's left
+HEADER_GAP = 40  # header bottom -> plot top (separate from CONTENT_MARGIN_Y, which covers screen edge -> header)
+CHART_LINE_THICKNESS = 7  # gridlines/minmax line use a hardcoded 2px instead
 GRID_COLOR = rl.Color(255, 255, 255, 60)
-LABEL_FONT_SIZE = 36
+LABEL_FONT_SIZE = 36  # shared by every small label in the overlay (ticks, gridlines, axis, etc.)
 MINMAX_LINE_COLOR = rl.Color(255, 255, 255, 130)
+THRESHOLD_LABEL_GAP = 20  # chart is narrowed to reserve this + the widest COLD/WARN/CRIT label, so the label can't overlap the gridline
 
+# Left column: gauge bar + readout, left-aligned at CONTENT_MARGIN_X. The bar's width is derived at render time to match the readout's width, so there's no dead space before the chart.
+GAUGE_COLUMN_GAP = 15  # single gap reused bar->labels and labels->chart, so spacing stays equal
+GAUGE_READOUT_GAP = 30  # minimum gap below the gauge bar; the readout is bottom-anchored, so the actual gap grows if the region tiles need more room (see _render)
+READOUT_UNIT_GAP = 8
+
+# Widest realistic digit strings, so width is reserved up front and never shifts as the live value's
+# digit count changes. "0" is the widest digit in this font (right filler for non-leading positions);
+# "4" is the widest of 1-9 (a real number never has a leading zero).
+VALUE_WIDTH_REFERENCES = ("-40", "400")
+
+# Region-duration tiles below the chart
 REGION_TILE_GAP = 20
 REGION_TILE_HEIGHT = 130
 REGION_TILE_LABEL_FONT_SIZE = 28
 REGION_TILE_VALUE_FONT_SIZE = 44
-# Candidate tick spacings; _pick_tick_interval() picks the smallest one that keeps the tick count
-# at or below TIME_TICK_MAX_COUNT for however much history is currently on screen, so a short
-# session (e.g. 90s in) still gets several labeled ticks instead of waiting for the first 10m one.
-TIME_TICK_INTERVALS_S = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800)
+REGION_TILES_MARGIN_TOP = 80  # minimum gap above the tiles; they're bottom-anchored, so the actual gap grows if the readout needs more room (see _render)
+
+# Chart time axis
+TIME_TICK_INTERVALS_S = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800)  # candidates; _draw_time_labels() picks the smallest keeping tick count <= TIME_TICK_MAX_COUNT
 TIME_TICK_MAX_COUNT = 6
