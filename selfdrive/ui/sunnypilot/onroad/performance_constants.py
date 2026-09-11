@@ -8,11 +8,11 @@ import pyray as rl
 
 # Temperature thresholds (transmission oil temp, Celsius)
 TRANS_ROOM_TEMP_C = 25.0  # gauge/chart domain floor, not a region boundary
-TRANS_COLD_TEMP_C = 79.0
-TRANS_WARN_TEMP_C = 120.0
-TRANS_CRIT_TEMP_C = 135.0
-THRESHOLDS = (TRANS_COLD_TEMP_C, TRANS_WARN_TEMP_C, TRANS_CRIT_TEMP_C)  # ascending order - zipped with THRESHOLD_LABELS
-THRESHOLD_LABELS = ("COLD", "WARN", "CRIT")
+TRANS_WARM_TEMP_C = 60.0 # fast shifts allowed at 60c
+TRANS_HOT_TEMP_C = 120.0
+TRANS_OVER_TEMP_C = 139.0 # 283f high temp dash warning
+THRESHOLDS = (TRANS_WARM_TEMP_C, TRANS_HOT_TEMP_C, TRANS_OVER_TEMP_C)  # ascending order - zipped with THRESHOLD_LABELS
+THRESHOLD_LABELS = ("WARM", "HOT", "OVER")  # each names the region *above* its gridline
 
 GAUGE_TICK_VALUES = (TRANS_ROOM_TEMP_C, *THRESHOLDS)  # temps shown as ticks on the gauge
 
@@ -35,7 +35,7 @@ CHART_LINE_THICKNESS = 7  # gridlines/minmax line use a hardcoded 2px instead
 GRID_COLOR = rl.Color(255, 255, 255, 60)
 LABEL_FONT_SIZE = 36  # shared by every small label in the overlay (ticks, gridlines, axis, etc.)
 MINMAX_LINE_COLOR = rl.Color(255, 255, 255, 130)
-THRESHOLD_LABEL_GAP = 20  # chart is narrowed to reserve this + the widest COLD/WARN/CRIT label, so the label can't overlap the gridline
+THRESHOLD_LABEL_GAP = 20  # chart is narrowed to reserve this + the widest WARM/HOT/OVER label, so the label can't overlap the gridline
 
 # Left column: gauge bar + readout, left-aligned at CONTENT_MARGIN_X. The bar's width is derived at render time to match the readout's width, so there's no dead space before the chart.
 GAUGE_COLUMN_GAP = 15  # single gap reused bar->labels and labels->chart, so spacing stays equal

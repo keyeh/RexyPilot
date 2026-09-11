@@ -49,7 +49,7 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import (
   TILE_PADDING,
   TIME_TICK_INTERVALS_S,
   TIME_TICK_MAX_COUNT,
-  TRANS_CRIT_TEMP_C,
+  TRANS_OVER_TEMP_C,
   TRANS_ROOM_TEMP_C,
   VALUE_WIDTH_REFERENCES,
 )
@@ -274,7 +274,7 @@ class PerformanceGraph(Widget):
     plot_h = rect.y + rect.height - CONTENT_MARGIN_Y - bottom_content_height - plot_y
 
     def to_y(v: float) -> float:
-      return plot_y + plot_h - (v - TRANS_ROOM_TEMP_C) / (TRANS_CRIT_TEMP_C - TRANS_ROOM_TEMP_C) * plot_h
+      return plot_y + plot_h - (v - TRANS_ROOM_TEMP_C) / (TRANS_OVER_TEMP_C - TRANS_ROOM_TEMP_C) * plot_h
 
     # Widths use fixed reference strings, not live text, so nothing shifts as digit counts change.
     value_width = _max_text_width(self._font_title, VALUE_WIDTH_REFERENCES, FONT_SIZES.current_speed)
@@ -341,7 +341,7 @@ class PerformanceGraph(Widget):
     rl.draw_rectangle_rounded(bar_rect, ROUNDNESS, 10, rl.Color(255, 255, 255, 18))
 
     if not math.isnan(live_temp):
-      fill_top = to_y(min(max(live_temp, TRANS_ROOM_TEMP_C), TRANS_CRIT_TEMP_C))
+      fill_top = to_y(min(max(live_temp, TRANS_ROOM_TEMP_C), TRANS_OVER_TEMP_C))
       fill_height = bar_rect.y + bar_rect.height - fill_top
       rl.begin_scissor_mode(int(bar_rect.x), int(fill_top), int(bar_rect.width), int(fill_height) + 1)
       rl.draw_rectangle_rounded(bar_rect, ROUNDNESS, 10, get_color_for_temp(live_temp))
@@ -437,12 +437,14 @@ class PerformanceGraph(Widget):
     """Plain text, no tile background/label like its neighbors - a live instantaneous stat, not a session duration."""
     if rate is None:
       color, text = COLORS.GREY, "-"
-    elif rate > RATE_STEADY_THRESHOLD_C_S:
-      color, text = REGION_COLORS["WARN"], f"+{rate:.1f}°/s"
-    elif rate < -RATE_STEADY_THRESHOLD_C_S:
-      color, text = REGION_COLORS["COLD"], f"{rate:.1f}°/s"
     else:
-      color, text = COLORS.WHITE_TRANSLUCENT, "steady"
+      if rate > RATE_STEADY_THRESHOLD_C_S:
+        color = REGION_COLORS["HOT"]
+      elif rate < -RATE_STEADY_THRESHOLD_C_S:
+        color = REGION_COLORS["COLD"]
+      else:
+        color = COLORS.WHITE_TRANSLUCENT
+      text = f"{rate:+.1f}°/s"
 
     padding = 8  # small breathing room so the text doesn't touch the neighboring tile or the row's edges
     font_size = _max_font_size_to_fit(self._font_title, text, tile_rect.width - padding * 2, tile_rect.height - padding * 2)
