@@ -11,7 +11,8 @@ TRANS_ROOM_TEMP_C = 25.0  # gauge/chart domain floor, not a region boundary
 TRANS_COLD_TEMP_C = 79.0
 TRANS_WARN_TEMP_C = 120.0
 TRANS_CRIT_TEMP_C = 135.0
-THRESHOLDS = (TRANS_COLD_TEMP_C, TRANS_WARN_TEMP_C, TRANS_CRIT_TEMP_C)  # ascending order - zipped with region labels elsewhere
+THRESHOLDS = (TRANS_COLD_TEMP_C, TRANS_WARN_TEMP_C, TRANS_CRIT_TEMP_C)  # ascending order - zipped with THRESHOLD_LABELS
+THRESHOLD_LABELS = ("COLD", "WARN", "CRIT")
 
 GAUGE_TICK_VALUES = (TRANS_ROOM_TEMP_C, *THRESHOLDS)  # temps shown as ticks on the gauge
 

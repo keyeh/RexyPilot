@@ -43,6 +43,7 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.performance_constants import (
   REGION_TILES_MARGIN_TOP,
   ROUNDNESS,
   THRESHOLDS,
+  THRESHOLD_LABELS,
   THRESHOLD_LABEL_GAP,
   TILE_LEFT_MARGIN,
   TILE_PADDING,
@@ -59,21 +60,25 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
 
 
-def read_trans_oil_temp() -> float:
+def read_and_sample_trans_oil_temp(history: deque[tuple[float, float]]) -> float:
+  """Reads the live transOilTemp and appends a history sample if due.
+
+  Must be called every frame by whichever widget is actually rendering, since only the top-of-nav-stack widget renders.
+  """
   sm = ui_state.sm
   if sm.recv_frame["carStateSP"] < ui_state.started_frame:
     return float('nan')
-  return sm["carStateSP"].transOilTemp
+  temp = sm["carStateSP"].transOilTemp
+  if not math.isnan(temp):
+    now = rl.get_time()
+    if not history or now - history[-1][0] >= HISTORY_SAMPLE_INTERVAL_S:
+      history.append((now, temp))
+  return temp
 
 
-def sample_if_due(history: deque[tuple[float, float]], trans_oil_temp: float) -> None:
-  """Must be called every frame by whichever widget is actually rendering, since only the top-of-nav-stack widget renders."""
-  if math.isnan(trans_oil_temp):
-    return
-  now = rl.get_time()
-  if history and now - history[-1][0] < HISTORY_SAMPLE_INTERVAL_S:
-    return
-  history.append((now, trans_oil_temp))
+def _is_metric() -> bool:
+  return True  # TODO: temporarily hardcoded to Celsius for testing
+  # return ui_state.is_metric
 
 
 def _split_at_thresholds(t0: float, v0: float, t1: float, v1: float) -> list[tuple[tuple[float, float], tuple[float, float]]]:
@@ -195,17 +200,14 @@ class PerformanceRenderer(Widget):
     return self._tile_rect  # restrict taps to the visible tile, not the full HUD rect
 
   def update(self):
-    self.trans_oil_temp = read_trans_oil_temp()
-    sample_if_due(self.history, self.trans_oil_temp)
+    self.trans_oil_temp = read_and_sample_trans_oil_temp(self.history)
 
   def _render(self, rect: rl.Rectangle) -> None:
     if math.isnan(self.trans_oil_temp):
       self._tile_rect = rl.Rectangle(0, 0, 0, 0)
       return
 
-    is_metric = True  # TODO: temporarily hardcoded to Celsius for testing
-    # is_metric = ui_state.is_metric
-    value, unit = _convert_temp(self.trans_oil_temp, is_metric)
+    value, unit = _convert_temp(self.trans_oil_temp, _is_metric())
     color = get_color_for_temp(self.trans_oil_temp)
 
     items = [
@@ -255,12 +257,9 @@ class PerformanceGraph(Widget):
   def _render(self, rect: rl.Rectangle) -> None:
     rl.draw_rectangle_rec(rect, TILE_BG_COLOR)
 
-    is_metric = True  # TODO: temporarily hardcoded to Celsius for testing
-    # is_metric = ui_state.is_metric
+    is_metric = _is_metric()
 
-    live_temp = read_trans_oil_temp()
-    sample_if_due(self._history, live_temp)
-
+    live_temp = read_and_sample_trans_oil_temp(self._history)
     samples = list(self._history)
 
     content_x = rect.x + CONTENT_MARGIN_X
@@ -286,7 +285,7 @@ class PerformanceGraph(Widget):
     gauge_width = readout_width - GAUGE_COLUMN_GAP - tick_label_width
 
     # Chart is narrowed to reserve a column for the threshold labels, so they can't overlap the gridlines.
-    region_label_width = _max_text_width(self._font_label, (tr(name) for name in ("COLD", "WARN", "CRIT")), LABEL_FONT_SIZE)
+    region_label_width = _max_text_width(self._font_label, (tr(name) for name in THRESHOLD_LABELS), LABEL_FONT_SIZE)
 
     gauge_rect = rl.Rectangle(content_x, plot_y, gauge_width, plot_h)
     graph_x = gauge_rect.x + gauge_rect.width + GAUGE_COLUMN_GAP + tick_label_width + GAUGE_COLUMN_GAP
@@ -305,7 +304,7 @@ class PerformanceGraph(Widget):
     def to_x(t: float) -> float:
       return graph_rect.x + (t - samples[0][0]) / max(samples[-1][0] - samples[0][0], 1.0) * graph_rect.width
 
-    for temp, label in zip(THRESHOLDS, ("COLD", "WARN", "CRIT")):
+    for temp, label in zip(THRESHOLDS, THRESHOLD_LABELS):
       self._draw_threshold_line(graph_rect, to_y, temp, tr(label))
 
     durations = dict.fromkeys(REGION_ORDER, 0.0)
@@ -352,11 +351,7 @@ class PerformanceGraph(Widget):
 
     tick_label_right = rect.x + rect.width + GAUGE_COLUMN_GAP + tick_label_width
     for temp in GAUGE_TICK_VALUES:
-      y = to_y(temp)
-      text = f"{temp:.0f}°"
-      text_size = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE)
-      origin = rl.Vector2(tick_label_right - text_size.x, y - text_size.y / 2)
-      rl.draw_text_ex(self._font_label, text, origin, LABEL_FONT_SIZE, 0, COLORS.GREY)
+      self._draw_label_at_y(f"{temp:.0f}°", tick_label_right, to_y(temp), COLORS.GREY, right_align=True)
 
   def _draw_readout(self, rect: rl.Rectangle, live_temp: float, is_metric: bool) -> None:
     """`rect` spans gauge-bottom to screen-bottom; the value is bottom-anchored CONTENT_MARGIN_Y above rect's bottom to match the region tiles' margin."""
@@ -377,14 +372,17 @@ class PerformanceGraph(Widget):
       unit_origin = rl.Vector2(rect.x + value_size.x + READOUT_UNIT_GAP, origin_y + value_ink_top - unit_ink_top)
       rl.draw_text_ex(self._font_label, unit_text, unit_origin, unit_font_size, 0, color)
 
+  def _draw_label_at_y(self, text: str, x: float, y: float, color: rl.Color, *, right_align: bool = False) -> None:
+    """Draws `text` at LABEL_FONT_SIZE, vertically centered on y - shared by the gauge ticks and threshold lines."""
+    size = measure_text_cached(self._font_label, text, LABEL_FONT_SIZE)
+    origin_x = x - size.x if right_align else x
+    rl.draw_text_ex(self._font_label, text, rl.Vector2(origin_x, y - size.y / 2), LABEL_FONT_SIZE, 0, color)
+
   def _draw_threshold_line(self, graph_rect: rl.Rectangle, to_y, temp: float, label: str) -> None:
     """The label sits in the fixed-width column reserved to the right of graph_rect (see _render)."""
     y = to_y(temp)
     rl.draw_line_ex(rl.Vector2(graph_rect.x, y), rl.Vector2(graph_rect.x + graph_rect.width, y), 2, GRID_COLOR)
-
-    label_x = graph_rect.x + graph_rect.width + THRESHOLD_LABEL_GAP
-    label_size = measure_text_cached(self._font_label, label, LABEL_FONT_SIZE)
-    rl.draw_text_ex(self._font_label, label, rl.Vector2(label_x, y - label_size.y / 2), LABEL_FONT_SIZE, 0, GRID_COLOR)
+    self._draw_label_at_y(label, graph_rect.x + graph_rect.width + THRESHOLD_LABEL_GAP, y, GRID_COLOR)
 
   def _draw_minmax_line(self, graph_rect: rl.Rectangle, to_y, value: float, tag: str, is_metric: bool) -> None:
     y = to_y(value)
